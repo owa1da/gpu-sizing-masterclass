@@ -319,11 +319,13 @@
     ms.addEventListener("change",upd); dv.addEventListener("change",upd);
     seg($("mc-prec"),d=>{st.prec=d.prec;upd();});
     $("mc-users").addEventListener("input",e=>{st.users=+e.target.value;upd();});
-    $("mc-ctx").addEventListener("input",e=>{ st.ctx=+e.target.value; if(st.prompt>st.ctx){ st.prompt=st.ctx; $("mc-prompt").value=st.ctx; } upd(); });
-    $("mc-prompt").addEventListener("input",e=>{ st.prompt=+e.target.value; if(st.prompt>st.ctx){ st.ctx=Math.min(131072,Math.ceil(st.prompt/1024)*1024); $("mc-ctx").value=st.ctx; } upd(); });
+    // Avg prompt can't exceed the context window — its slider range tracks Context/user.
+    function syncPromptRange(){ const p=$("mc-prompt"); if(!p)return; p.max=st.ctx; if(st.prompt>st.ctx){ st.prompt=st.ctx; p.value=st.ctx; } }
+    $("mc-ctx").addEventListener("input",e=>{ st.ctx=+e.target.value; syncPromptRange(); upd(); });
+    $("mc-prompt").addEventListener("input",e=>{ st.prompt=+e.target.value; upd(); });
     ["cm-total","cm-active","cm-layers","cm-kvheads","cm-headdim","cm-kvbytes","cd-mem","cd-bw","cd-fp16","cd-fp8"].forEach(id=>{const el=$(id);if(el)el.addEventListener("input",upd);});
     const ck=$("cd-kind"); if(ck)ck.addEventListener("change",upd);
-    upd();
+    syncPromptRange(); upd();
   }
 
   /* ---------- Module 12: worked examples (rendered from data) ---------- */
