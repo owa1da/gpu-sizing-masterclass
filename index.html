@@ -386,7 +386,7 @@ H100, Q4:   (0.4/0.6) × 295 × (0.6/2)                      ≈ <span class="re
         <div class="ro accent"><div class="k">Per-user speed</div><div class="v" id="tp-peruser">— <span class="u">tok/s</span></div></div>
         <div class="ro"><div class="k">Total throughput</div><div class="v" id="tp-agg">— <span class="u">tok/s</span></div></div>
         <div class="ro"><div class="k">Currently</div><div class="v" id="tp-bound" style="font-size:1.1rem">—</div></div>
-        <div class="ro"><div class="k">Crossover B* ≈</div><div class="v" id="tp-knee">—</div></div>
+        <div class="ro"><div class="k">Crossover B* · bandwidth→compute</div><div class="v" id="tp-bstar">— <span class="u">users</span></div></div>
       </div>
       <div id="tp-fit" class="mt16" style="font-size:.86rem;line-height:1.5"></div>
       <div class="chart mt24" id="tp-chart"></div>
@@ -569,22 +569,22 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
       <div id="mc-cm-panel" class="card" style="display:none;padding:14px 16px;margin-top:12px">
         <div class="src" style="margin-bottom:10px"><b>Custom model</b> — enter the architecture; memory &amp; speed come from these numbers</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px">
-          <div class="field"><label>Total params (B)</label><input type="number" id="cm-total" value="30" min="0.1" step="0.1"></div>
+          <div class="field"><label>Total params (B)</label><input type="number" id="cm-total" placeholder="30" min="0.1" step="0.1"></div>
           <div class="field"><label>Active params (B)</label><input type="number" id="cm-active" placeholder="blank = dense" min="0.1" step="0.1"></div>
-          <div class="field"><label>Layers</label><input type="number" id="cm-layers" value="48" min="1" step="1"></div>
-          <div class="field"><label>KV heads</label><input type="number" id="cm-kvheads" value="8" min="1" step="1"></div>
-          <div class="field"><label>Head dim</label><input type="number" id="cm-headdim" value="128" min="1" step="1"></div>
-          <div class="field"><label>KV bytes (2=FP16, 1=FP8)</label><input type="number" id="cm-kvbytes" value="2" min="0.5" step="0.5"></div>
+          <div class="field"><label>Layers</label><input type="number" id="cm-layers" placeholder="48" min="1" step="1"></div>
+          <div class="field"><label>KV heads</label><input type="number" id="cm-kvheads" placeholder="8" min="1" step="1"></div>
+          <div class="field"><label>Head dim</label><input type="number" id="cm-headdim" placeholder="128" min="1" step="1"></div>
+          <div class="field"><label>KV bytes (2=FP16, 1=FP8)</label><input type="number" id="cm-kvbytes" placeholder="2" min="0.5" step="0.5"></div>
         </div>
       </div>
 
       <div id="mc-cd-panel" class="card" style="display:none;padding:14px 16px;margin-top:12px">
         <div class="src" style="margin-bottom:10px"><b>Custom device</b> — enter the specs</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px">
-          <div class="field"><label>Memory (GB)</label><input type="number" id="cd-mem" value="48" min="1" step="1"></div>
-          <div class="field"><label>Bandwidth (GB/s)</label><input type="number" id="cd-bw" value="1000" min="10" step="10"></div>
-          <div class="field"><label>FP16 TFLOPS</label><input type="number" id="cd-fp16" value="300" min="1" step="1"></div>
-          <div class="field"><label>FP8 TFLOPS (0=none)</label><input type="number" id="cd-fp8" value="0" min="0" step="1"></div>
+          <div class="field"><label>Memory (GB)</label><input type="number" id="cd-mem" placeholder="48" min="1" step="1"></div>
+          <div class="field"><label>Bandwidth (GB/s)</label><input type="number" id="cd-bw" placeholder="1000" min="10" step="10"></div>
+          <div class="field"><label>FP16 TFLOPS</label><input type="number" id="cd-fp16" placeholder="300" min="1" step="1"></div>
+          <div class="field"><label>FP8 TFLOPS (0=none)</label><input type="number" id="cd-fp8" placeholder="0" min="0" step="1"></div>
           <div class="field"><label>Type</label><select id="cd-kind"><option value="nvidia">NVIDIA (CUDA)</option><option value="apple">Apple (unified)</option></select></div>
         </div>
       </div>
@@ -607,6 +607,7 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
         <div class="ro"><div class="k">GPUs / machines needed</div><div class="v" id="mc-ndev">—</div></div>
         <div class="ro"><div class="k">Per-user speed</div><div class="v" id="mc-peruser">—</div></div>
         <div class="ro"><div class="k">Total throughput</div><div class="v" id="mc-agg">—</div></div>
+        <div class="ro"><div class="k">Crossover B* (compute-bound past this)</div><div class="v" id="mc-bstar">—</div></div>
         <div class="ro"><div class="k">TTFT (compute floor)</div><div class="v" id="mc-ttft-out">—</div></div>
         <div class="ro"><div class="k">Disk to store</div><div class="v" id="mc-disk">—</div></div>
       </div>

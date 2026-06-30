@@ -131,7 +131,7 @@
       const computeBound = state.users >= knee;
       $("tp-bound").textContent = computeBound ? "Compute-bound · saturated" : "Bandwidth-bound · scaling";
       $("tp-bound").style.color = computeBound ? "var(--warn)" : "var(--accent-3)";
-      $("tp-knee").innerHTML = (knee>=1?Math.round(knee):"<1") + ' <span class="u">users</span>';
+      $("tp-bstar").innerHTML = (knee>=1?Math.round(knee):"<1") + ' <span class="u">users</span>';
       renderFit(wGB);
       const pts=[1,4,8,16,32,64,128,200,256].map(u=>[u, aggAt(single,cap,u)]);
       CH().line("tp-chart",{yLabel:"total tok/s",xLabel:"concurrent users",series:[{name:"Aggregate throughput",color:COL[0],points:pts}]});
@@ -242,29 +242,43 @@
     const st={prec:"q4",users:16,ctx:8192,prompt:2000};
     const num=(id,def)=>{ const el=$(id), v=el?parseFloat(el.value):NaN; return isFinite(v)&&v>0?v:def; };
     function customModel(){
-      const tot=num("cm-total",30), act=num("cm-active",tot);
+      const tot=num("cm-total",0); if(!tot) return null; const act=num("cm-active",tot);
       return {id:"__custom__",name:"Custom model",paramsB:tot,activeB:Math.min(act,tot),
         layers:num("cm-layers",48),kvHeads:num("cm-kvheads",8),headDim:num("cm-headdim",128),
         kvBytes:num("cm-kvbytes",2),moe:act<tot,prec:st.prec};
     }
     function customDevice(){
+      const mem=num("cd-mem",0), bw=num("cd-bw",0), fp16=num("cd-fp16",0); if(!mem||!bw||!fp16) return null;
       const fp8=num("cd-fp8",0), kind=($("cd-kind")&&$("cd-kind").value)||"nvidia";
-      return {id:"__custom__",name:"Custom device",memGB:num("cd-mem",48),memCfg:"custom specs",
-        bwGBps:num("cd-bw",1000),fp16TF:num("cd-fp16",300),fp8TF:fp8>0?fp8:undefined,
+      return {id:"__custom__",name:"Custom device",memGB:mem,memCfg:"custom specs",
+        bwGBps:bw,fp16TF:fp16,fp8TF:fp8>0?fp8:undefined,
         kind:kind,eco:kind==="apple"?"Metal / MLX":"Custom · CUDA",priceUSD:0,tdp:0};
     }
     function curModel(){ return ms.value==="__custom__"?customModel():D().models.find(x=>x.id===ms.value); }
     function curDevice(){ return dv.value==="__custom__"?customDevice():D().devices.find(d=>d.id===dv.value); }
-    function build(){
-      const m=curModel();
-      return {m,s:{paramsTotalB:m.paramsB,paramsActiveB:m.activeB,bytesPerWeight:bpw(st.prec),
-        model:{layers:m.layers,kvHeads:m.kvHeads,headDim:m.headDim,kvBytes:m.kvBytes},
-        users:st.users,ctxTokens:st.ctx,promptTokens:st.prompt}};
-    }
     function upd(){
       $("mc-cm-panel").style.display = ms.value==="__custom__"?"block":"none";
       $("mc-cd-panel").style.display = dv.value==="__custom__"?"block":"none";
-      const {m,s}=build(), dev=curDevice(), r=C().evaluate(s,dev);
+      const m=curModel(), dev=curDevice();
+      if(!m || !dev){
+        ["mc-vram","mc-ndev","mc-peruser","mc-agg","mc-bstar","mc-ttft-out","mc-disk"].forEach(id=>{const el=$(id);if(el)el.innerHTML="—";});
+        $("mc-prec-val").textContent=precLabel(st.prec);
+        $("mc-users-val").textContent=st.users; $("mc-ctx-val").textContent=commas(st.ctx); $("mc-prompt-val").textContent=commas(st.prompt);
+        $("mc-model-hint").textContent = m?`${m.paramsB}B${m.moe?` (MoE · ${m.activeB}B active)`:""} · ${m.layers}L / ${m.kvHeads} KV heads`:"↑ enter total params to define the model";
+        $("mc-device-hint").textContent = dev?`${dev.memGB}GB · ${commas(dev.bwGBps)} GB/s · ${dev.eco}`:"↑ enter memory, bandwidth & FP16 TFLOPS";
+        $("mc-moe-note").style.display="none"; $("mc-compute-note").innerHTML="";
+        const vv=$("mc-verdict"); vv.className="verdict mt24 tight";
+        vv.querySelector(".vic").textContent="…"; vv.querySelector(".vt").textContent="Enter your custom specs above";
+        vv.querySelector(".vs").textContent=`Fill in the ${(!m&&!dev)?"model and device":(!m?"model":"device")} fields to size this.`;
+        $("mc-membar").innerHTML=""; $("mc-fit").innerHTML="";
+        return;
+      }
+      const s={paramsTotalB:m.paramsB,paramsActiveB:m.activeB,bytesPerWeight:bpw(st.prec),
+        model:{layers:m.layers,kvHeads:m.kvHeads,headDim:m.headDim,kvBytes:m.kvBytes},
+        users:st.users,ctxTokens:st.ctx,promptTokens:st.prompt};
+      const r=C().evaluate(s,dev);
+      const _activeB=s.paramsActiveB||s.paramsTotalB, _awGB=C().weightsGB(_activeB,s.bytesPerWeight);
+      const bstar=Math.round(C().decodeComputeCapTps(dev.fp16TF,_activeB)/C().singleStreamTps(dev.bwGBps,_awGB));
       $("mc-model-hint").textContent=`${m.paramsB}B${m.moe?` (MoE · ${m.activeB}B active)`:""} · ${m.layers}L / ${m.kvHeads} KV heads`;
       $("mc-prec-val").textContent=precLabel(st.prec);
       $("mc-device-hint").textContent=`${dev.memGB}GB · ${commas(dev.bwGBps)} GB/s · ${dev.eco}`;
@@ -279,6 +293,7 @@
       $("mc-ndev").innerHTML=`${r.devicesNeeded}× <span class="u">${shortName(dev)}</span>`;
       $("mc-peruser").innerHTML=`${fmt(r.perUserTps)} <span class="u">tok/s</span>`;
       $("mc-agg").innerHTML=`${fmt(r.aggregateTps)} <span class="u">tok/s</span>`;
+      $("mc-bstar").innerHTML=`${bstar>=1?commas(bstar):"<1"} <span class="u">users</span>`;
       $("mc-ttft-out").innerHTML= r.ttft<1?`${(r.ttft*1000).toFixed(0)} <span class="u">ms</span>`:`${r.ttft.toFixed(2)} <span class="u">s</span>`;
       $("mc-disk").innerHTML=`${fmt(r.diskGB)} <span class="u">GB</span>`;
       const v=$("mc-verdict");
@@ -304,8 +319,8 @@
     ms.addEventListener("change",upd); dv.addEventListener("change",upd);
     seg($("mc-prec"),d=>{st.prec=d.prec;upd();});
     $("mc-users").addEventListener("input",e=>{st.users=+e.target.value;upd();});
-    $("mc-ctx").addEventListener("input",e=>{st.ctx=+e.target.value;upd();});
-    $("mc-prompt").addEventListener("input",e=>{st.prompt=+e.target.value;upd();});
+    $("mc-ctx").addEventListener("input",e=>{ st.ctx=+e.target.value; if(st.prompt>st.ctx){ st.prompt=st.ctx; $("mc-prompt").value=st.ctx; } upd(); });
+    $("mc-prompt").addEventListener("input",e=>{ st.prompt=+e.target.value; if(st.prompt>st.ctx){ st.ctx=Math.min(131072,Math.ceil(st.prompt/1024)*1024); $("mc-ctx").value=st.ctx; } upd(); });
     ["cm-total","cm-active","cm-layers","cm-kvheads","cm-headdim","cm-kvbytes","cd-mem","cd-bw","cd-fp16","cd-fp8"].forEach(id=>{const el=$(id);if(el)el.addEventListener("input",upd);});
     const ck=$("cd-kind"); if(ck)ck.addEventListener("change",upd);
     upd();

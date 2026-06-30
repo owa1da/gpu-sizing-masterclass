@@ -33,12 +33,15 @@ window.DATA = {
   models:[
     {id:"llama8b",  name:"Llama 3.1 8B",   paramsB:8.0,  activeB:8.0,  layers:32, kvHeads:8, headDim:128, kvBytes:2, prec:"fp16", moe:false},
     {id:"qwen7b",   name:"Qwen2.5 7B",     paramsB:7.6,  activeB:7.6,  layers:28, kvHeads:4, headDim:128, kvBytes:2, prec:"fp16", moe:false},
-    {id:"qwen14b",  name:"Qwen2.5 14B",    paramsB:14.7, activeB:14.7, layers:48, kvHeads:8, headDim:128, kvBytes:2, prec:"fp16", moe:false},
-    {id:"qwen32b",  name:"Qwen2.5 32B",    paramsB:32.5, activeB:32.5, layers:64, kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
+    {id:"qwen14b",  name:"Qwen2.5 14B",    paramsB:14.7, activeB:14.7, layers:48, kvHeads:8,  headDim:128, kvBytes:2, prec:"fp16", moe:false},
+    {id:"gemma31b", name:"Gemma 4 31B",    paramsB:31,   activeB:31,   layers:60, kvHeads:16, headDim:256, kvBytes:2, prec:"q4",   moe:false, kvNote:"Hybrid attention — 50 of 60 layers use a 1024-token sliding window, so real long-context KV is far lower (~15 GiB at 256K). Treat this as a loose upper bound."},
+    {id:"qwen32b",  name:"Qwen2.5 32B",    paramsB:32.5, activeB:32.5, layers:64, kvHeads:8,  headDim:128, kvBytes:2, prec:"q4",   moe:false},
     {id:"llama70b", name:"Llama 3.1 70B",  paramsB:70.6, activeB:70.6, layers:80, kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
     {id:"qwen72b",  name:"Qwen2.5 72B",    paramsB:72.7, activeB:72.7, layers:80, kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
     {id:"llama405b",name:"Llama 3.1 405B", paramsB:405,  activeB:405,  layers:126,kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
+    {id:"qwen36a3b",name:"Qwen3.6 35B-A3B (MoE)", paramsB:35,  activeB:3,    layers:10, kvHeads:2, headDim:256, kvBytes:2, prec:"q4",  moe:true, kvNote:"Hybrid linear-attention MoE — only 10 of 40 layers carry a KV cache (the rest are Gated DeltaNet); modeled with those 10 KV-bearing layers."},
     {id:"mixtral",  name:"Mixtral 8×7B (MoE)", paramsB:46.7, activeB:12.9, layers:32, kvHeads:8, headDim:128, kvBytes:2, prec:"q4", moe:true},
+    {id:"gptoss120b",name:"GPT-OSS 120B (MoE)", paramsB:117,  activeB:5.1,  layers:36, kvHeads:8, headDim:64,  kvBytes:2, prec:"awq4", moe:true},
     {id:"deepseek", name:"DeepSeek-V3 (MoE)",   paramsB:671,  activeB:37,   layers:61, kvHeads:1, headDim:576, kvBytes:1, prec:"fp8", moe:true, kvNote:"MLA compresses KV ~25× — modeled here as a 576-dim shared latent."}
   ],
 
