@@ -278,12 +278,16 @@
         users:st.users,ctxTokens:st.ctx,promptTokens:st.prompt};
       const r=C().evaluate(s,dev);
       const _activeB=s.paramsActiveB||s.paramsTotalB, _awGB=C().weightsGB(_activeB,s.bytesPerWeight);
-      const bstar=Math.round(C().decodeComputeCapTps(dev.fp16TF,_activeB)/C().singleStreamTps(dev.bwGBps,_awGB));
+      // MoE: the *batched* compute ceiling behaves like ~3× active params (requests fan out across more
+      // experts as they batch), capped at total — the SAME effective count CALC.evaluate uses for the
+      // throughput curve. Dense: _capB === _activeB, so B* is unchanged. Keeps B* consistent with the curve.
+      const _capB=(s.paramsTotalB>_activeB)?Math.min(s.paramsTotalB,_activeB*3):_activeB;
+      const bstar=Math.round(C().decodeComputeCapTps(dev.fp16TF,_capB)/C().singleStreamTps(dev.bwGBps,_awGB));
       $("mc-model-hint").textContent=`${m.paramsB}B${m.moe?` (MoE · ${m.activeB}B active)`:""} · ${m.layers}L / ${m.kvHeads} KV heads`;
       $("mc-prec-val").textContent=precLabel(st.prec);
       $("mc-device-hint").textContent=`${dev.memGB}GB · ${commas(dev.bwGBps)} GB/s · ${dev.eco}`;
       const moeNote=$("mc-moe-note");
-      if(m.moe){ moeNote.style.display="block"; moeNote.innerHTML=`⚠ <b>MoE</b> — memory sizes on <b>${m.paramsB}B total</b>, but speed &amp; TTFT use only <b>${m.activeB}B active</b> (≈${(m.paramsB/m.activeB).toFixed(1)}× lighter compute than its size).`; }
+      if(m.moe){ const _eff=+Math.min(m.paramsB,m.activeB*3).toFixed(1); moeNote.style.display="block"; moeNote.innerHTML=`⚠ <b>MoE</b> — memory sizes on <b>${m.paramsB}B total</b>; a single request uses only <b>${m.activeB}B active</b> (its top-k experts) → fast single-user speed &amp; TTFT. Batched requests fan out across far more experts and run less efficiently, so the throughput ceiling &amp; <b>Crossover B*</b> behave like a ≈<b>${_eff}B dense model</b> (≈3× active, capped at total). That's why per-user speed bends down at B* far sooner than the ${m.activeB}B active alone (Eqs 1–4) would imply.`; }
       else moeNote.style.display="none";
       const cf=bestCompute(dev);
       $("mc-compute-note").innerHTML=`⚙ <b>${shortName(dev)}</b>'s fastest compute format is <b>${cf}</b>. Your <b>${precLabel(st.prec)}</b> sets the model's weight <i>storage</i> — the GPU does the math in its own format, independent of that choice.`;
