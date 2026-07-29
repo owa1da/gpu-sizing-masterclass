@@ -28,22 +28,33 @@ window.DATA = {
   ],
   precDefault:"fp16",
 
+  /* ---- KV cache precision (bytes per stored K/V value) ----
+     Independent of weight precision: engines quantize the cache separately
+     (vLLM kv_cache_dtype, llama.cpp --cache-type-k/v). Halving this halves
+     KV memory, which is what sets concurrency once weights fit. */
+  kvPrecisions:[
+    {bytes:2,   label:"FP16", hint:"2 bytes per K/V value · reference, lossless", quality:"Reference", q:"ok"},
+    {bytes:1,   label:"FP8",  hint:"1 byte per K/V value · near-lossless, ½ the KV", quality:"Near-lossless", q:"ok"},
+    {bytes:0.5, label:"INT4", hint:"0.5 bytes per K/V value · aggressive, ¼ the KV", quality:"Measurable drop", q:"warn"}
+  ],
+  kvPrecDefault:2,
+
   /* ---- Real model presets (exact KV architecture) ----
      kv per token bytes = 2 * layers * kvHeads * headDim * 2 (FP16 KV) */
   models:[
     {id:"llama8b",  name:"Llama 3.1 8B",   paramsB:8.0,  activeB:8.0,  layers:32, kvHeads:8, headDim:128, kvBytes:2, prec:"fp16", moe:false},
     {id:"qwen7b",   name:"Qwen2.5 7B",     paramsB:7.6,  activeB:7.6,  layers:28, kvHeads:4, headDim:128, kvBytes:2, prec:"fp16", moe:false},
     {id:"qwen14b",  name:"Qwen2.5 14B",    paramsB:14.7, activeB:14.7, layers:48, kvHeads:8,  headDim:128, kvBytes:2, prec:"fp16", moe:false},
-    {id:"gemma31b", name:"Gemma 4 31B",    paramsB:31,   activeB:31,   layers:60, kvHeads:16, headDim:256, kvBytes:2, prec:"q4",   moe:false, kvNote:"Hybrid attention — 50 of 60 layers use a 1024-token sliding window, so real long-context KV is far lower (~15 GiB at 256K). Treat this as a loose upper bound."},
+    {id:"gemma31b", name:"Gemma 4 31B",    paramsB:31,   activeB:31,   layers:60, fullLayers:10, swaWindow:1024, kvHeads:4, headDim:512, swaKvHeads:16, swaHeadDim:256, kvBytes:2, prec:"q4",   moe:false, kvNote:"Hybrid attention — every 6th layer is global; the other 50 hold a 1024-token window. The two classes also differ in shape: global layers use 4 KV heads × 512 dim, sliding layers 16 × 256."},
     {id:"qwen32b",  name:"Qwen2.5 32B",    paramsB:32.5, activeB:32.5, layers:64, kvHeads:8,  headDim:128, kvBytes:2, prec:"q4",   moe:false},
     {id:"llama70b", name:"Llama 3.1 70B",  paramsB:70.6, activeB:70.6, layers:80, kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
     {id:"qwen72b",  name:"Qwen2.5 72B",    paramsB:72.7, activeB:72.7, layers:80, kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
     {id:"llama405b",name:"Llama 3.1 405B", paramsB:405,  activeB:405,  layers:126,kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
-    {id:"gemma26a4b",name:"Gemma 4 26B-A4B (MoE)", paramsB:25.2, activeB:3.8, layers:30, kvHeads:8, headDim:256, kvBytes:2, prec:"q4", moe:true, kvNote:"Hybrid attention — 25 of 30 layers use a 1024-token sliding window; only 5 are full-attention (every 6th, including the last). Real KV at 256K is ~11 GB per user, not the ~64 GB this all-layers figure shows. Treat it as a loose upper bound."},
+    {id:"gemma26a4b",name:"Gemma 4 26B-A4B (MoE)", paramsB:25.2, activeB:3.8, layers:30, fullLayers:5, swaWindow:1024, kvHeads:2, headDim:512, swaKvHeads:8, swaHeadDim:256, kvBytes:2, prec:"q4", moe:true, kvNote:"Hybrid attention — every 6th layer is global (incl. the last); the other 25 hold a 1024-token window. Global layers use 2 KV heads × 512 dim, sliding layers 8 × 256. Modeled with K and V both cached; an engine exploiting attention_k_eq_v on the global layers could halve their share."},
     {id:"qwen36a3b",name:"Qwen3.6 35B-A3B (MoE)", paramsB:35,  activeB:3,    layers:10, kvHeads:2, headDim:256, kvBytes:2, prec:"q4",  moe:true, kvNote:"Hybrid linear-attention MoE — only 10 of 40 layers carry a KV cache (the rest are Gated DeltaNet); modeled with those 10 KV-bearing layers."},
     {id:"mixtral",  name:"Mixtral 8×7B (MoE)", paramsB:46.7, activeB:12.9, layers:32, kvHeads:8, headDim:128, kvBytes:2, prec:"q4", moe:true},
-    {id:"gptoss120b",name:"GPT-OSS 120B (MoE)", paramsB:117,  activeB:5.1,  layers:36, kvHeads:8, headDim:64,  kvBytes:2, prec:"awq4", moe:true},
-    {id:"deepseek", name:"DeepSeek-V3 (MoE)",   paramsB:671,  activeB:37,   layers:61, kvHeads:1, headDim:576, kvBytes:1, prec:"fp8", moe:true, kvNote:"MLA compresses KV ~25× — modeled here as a 576-dim shared latent."}
+    {id:"gptoss120b",name:"GPT-OSS 120B (MoE)", paramsB:117,  activeB:5.1,  layers:36, fullLayers:18, swaWindow:128, kvHeads:8, headDim:64,  kvBytes:2, prec:"awq4", moe:true, kvNote:"Attention alternates every layer: 18 global, 18 banded with a very aggressive 128-token window, so the windowed half costs a near-constant ~4.7 MB/sequence."},
+    {id:"deepseek", name:"DeepSeek-V3 (MoE)",   paramsB:671,  activeB:37,   layers:61, kvHeads:1, headDim:576, kvTensors:1, kvBytes:2, prec:"fp8", moe:true, kvNote:"MLA caches ONE 576-dim compressed latent per token per layer (512 kv_lora_rank + 64 decoupled RoPE key shared across all 128 heads) — not a separate K and V, hence kvTensors:1."}
   ],
 
   /* ---- Devices (verified specs, 2026) ----
@@ -108,5 +119,12 @@ window.DATA = {
   }
 };
 
-/* derived helper: KV bytes/token for a model preset */
-window.DATA.kvPerTokenMB = function(m){ return (2*m.layers*m.kvHeads*m.headDim*(m.kvBytes||2))/1e6; };
+/* derived helper: KV MB/token for a model preset.
+   Pass ctxTokens to get the EFFECTIVE rate at that context (hybrid/sliding-window models
+   fall below the naive rate once context outgrows the window). Omit it for the naive
+   all-layers-at-full-context upper bound. Delegates to CALC so the math lives in one place. */
+window.DATA.kvPerTokenMB = function(m, ctxTokens){
+  const C=window.CALC;
+  if(!C) return (2*m.layers*m.kvHeads*m.headDim*(m.kvBytes||2))/1e6;
+  return (ctxTokens ? C.kvBytesPerTokenEff(ctxTokens,m) : C.kvBytesPerToken(m))/1e6;
+};

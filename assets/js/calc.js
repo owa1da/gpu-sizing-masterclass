@@ -24,11 +24,53 @@
 
   // ---- Memory ----
   function weightsGB(paramsB, bytesPerWeight){ return paramsB*bytesPerWeight; }
-  function kvBytesPerToken(m){ // m: {layers, kvHeads, headDim, kvBytes}
-    return 2*m.layers*m.kvHeads*m.headDim*(m.kvBytes||2);
+
+  // Bytes of KV per token FOR ONE LAYER.
+  //   m.kvTensors  how many tensors are cached per token per layer.
+  //                2 = a Key and a Value (normal GQA/MHA). 1 = a single shared latent
+  //                (DeepSeek-style MLA caches one compressed vector, not a K and a V).
+  //   sliding=true selects the windowed layers' geometry, which can differ from the
+  //                global layers' (both Gemma 4 models do exactly this).
+  function kvTensorsOf(m){ return m.kvTensors==null?2:m.kvTensors; }
+  function kvBytesPerTokenPerLayer(m, sliding){
+    const heads = sliding&&m.swaKvHeads!=null ? m.swaKvHeads : m.kvHeads;
+    const dim   = sliding&&m.swaHeadDim!=null ? m.swaHeadDim : m.headDim;
+    return kvTensorsOf(m)*heads*dim*(m.kvBytes||2);
+  }
+
+  // Naive per-token KV: every layer holding every token, each at its own geometry.
+  // This is the UPPER BOUND — correct for pure global-attention models (Llama, Qwen2.5,
+  // Mixtral), and the number the lesson text derives. Hybrid models must use kvBytesPerSeq.
+  function kvBytesPerToken(m){
+    const {full,swa}=kvLayerSplit(m);
+    return kvBytesPerTokenPerLayer(m,false)*full + kvBytesPerTokenPerLayer(m,true)*swa;
   }
   function kvGBPerToken(m){ return kvBytesPerToken(m)/1e9; }
-  function kvGB(users, ctxTokens, m){ return users*ctxTokens*kvGBPerToken(m); }
+
+  // ---- Hybrid / sliding-window attention ----
+  // Real KV is NOT linear in context when some layers use a sliding window: those layers
+  // stop growing once the sequence passes the window. Splitting the stack:
+  //   m.layers      total KV-BEARING layers (layers with no KV at all — Mamba/Gated
+  //                 DeltaNet — are simply excluded from this count in DATA)
+  //   m.fullLayers  how many of those use global attention (default: all of them)
+  //   m.swaWindow   window size for the remaining (layers - fullLayers) layers
+  // Global layers cost ctx tokens each; windowed layers cost min(ctx, window) each.
+  function kvLayerSplit(m){
+    const full = (m.fullLayers==null) ? m.layers : Math.max(0,Math.min(m.fullLayers,m.layers));
+    return {full, swa: m.layers-full, window: m.swaWindow||Infinity};
+  }
+  function kvBytesPerSeq(ctxTokens, m){
+    const {full,swa,window}=kvLayerSplit(m);
+    return kvBytesPerTokenPerLayer(m,false)*full*ctxTokens
+         + kvBytesPerTokenPerLayer(m,true)*swa*Math.min(ctxTokens,window);
+  }
+  function kvGBPerSeq(ctxTokens, m){ return kvBytesPerSeq(ctxTokens,m)/1e9; }
+  // Effective average bytes/token at this context — equals kvBytesPerToken for pure global
+  // models, and falls below it for hybrid models as context outgrows the window.
+  function kvBytesPerTokenEff(ctxTokens, m){ return ctxTokens>0 ? kvBytesPerSeq(ctxTokens,m)/ctxTokens : 0; }
+  function isHybridKV(m){ const s=kvLayerSplit(m); return s.swa>0 && isFinite(s.window); }
+
+  function kvGB(users, ctxTokens, m){ return users*kvGBPerSeq(ctxTokens,m); }
   function overheadGB(wGB){ const k=K(); return Math.max(k.minOverheadGB, k.overheadFrac*wGB); }
   function requiredVRAM(wGB, kv, oh){ return wGB + kv + (oh!=null?oh:overheadGB(wGB+kv)); }
 
@@ -44,7 +86,7 @@
   }
   // max concurrent sequences the KV budget allows.
   function kvMaxBatch(kvBudgetGB, ctxTokens, m){
-    const per=ctxTokens*kvGBPerToken(m); return per>0?Math.max(1,Math.floor(kvBudgetGB/per)):1;
+    const per=kvGBPerSeq(ctxTokens,m); return per>0?Math.max(1,Math.floor(kvBudgetGB/per)):1;
   }
   // Aggregate decode throughput: batched weight-read amortization until compute roof.
   // returns {batch, aggregateTps, perUserTps, bound}
@@ -79,10 +121,19 @@
   // ---- Device capacity ----
   function usableMem(capacityGB, kind){ const k=K(); return capacityGB*(kind==="apple"?k.appleUtil:k.nvUtil); }
   function devicesNeeded(reqVRAM, usablePerDevice){ return Math.max(1,Math.ceil(reqVRAM/usablePerDevice)); }
+  // Largest weights+KV that still fits once overhead is charged ON TOP of it.
+  // overhead = max(minOverheadGB, overheadFrac*(w+kv)), so solve whichever branch binds:
+  //   fraction branch: X*(1+frac) <= T ; floor branch: X + minOverhead <= T
+  function payloadBudget(totalUsableGB){
+    const k=K(), viaFrac=totalUsableGB/(1+k.overheadFrac);
+    return viaFrac >= k.minOverheadGB/k.overheadFrac ? viaFrac : totalUsableGB-k.minOverheadGB;
+  }
 
   // ---- Whole-scenario evaluation ----
-  // scenario: {paramsTotalB, paramsActiveB, bytesPerWeight, model{layers,kvHeads,headDim,kvBytes},
-  //            users, ctxTokens, promptTokens, targetTps, targetTtft, kvBytesOverride}
+  // scenario: {paramsTotalB, paramsActiveB, bytesPerWeight, users, ctxTokens, promptTokens,
+  //            targetTps, targetTtft,
+  //            model{layers, kvHeads, headDim, kvBytes,          // required
+  //                  fullLayers, swaWindow, swaKvHeads, swaHeadDim, kvTensors}}  // optional
   // device: {memGB, bwGBps, fp16TF, kind}
   function evaluate(s, d){
     const wGB=weightsGB(s.paramsTotalB, s.bytesPerWeight);
@@ -93,7 +144,9 @@
     const usable=usableMem(d.memGB,d.kind);
     const nDev=devicesNeeded(reqV,usable);
     const totalUsable=usable*nDev;
-    const kvBudget=Math.max(0,totalUsable-wGB-oh);
+    // KV budget must charge overhead at the batch we're solving FOR, not at the current
+    // user count — otherwise maxBatch reports a batch that wouldn't actually fit.
+    const kvBudget=Math.max(0,payloadBudget(totalUsable)-wGB);
     // sharded across nDev GPUs => bandwidth & compute scale with nDev, minus TP comms overhead
     const tpEff=nDev<=1?1:Math.max(0.5,Math.pow(0.9,nDev-1));
     const activeB=s.paramsActiveB||s.paramsTotalB;
@@ -122,8 +175,10 @@
   }
 
   window.CALC={
-    weightsGB,kvBytesPerToken,kvGBPerToken,kvGB,overheadGB,requiredVRAM,
+    weightsGB,kvBytesPerToken,kvGBPerToken,kvBytesPerTokenPerLayer,
+    kvLayerSplit,kvBytesPerSeq,kvGBPerSeq,kvBytesPerTokenEff,isHybridKV,
+    kvGB,overheadGB,requiredVRAM,
     singleStreamTps,decodeComputeCapTps,kvMaxBatch,aggregateDecode,
-    prefillTps,ttft,diskGB,usableMem,devicesNeeded,evaluate,FALLBACK
+    prefillTps,ttft,diskGB,usableMem,devicesNeeded,payloadBudget,evaluate,FALLBACK
   };
 })();

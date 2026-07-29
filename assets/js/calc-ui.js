@@ -11,6 +11,23 @@
   const commas=n=>Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g,",");
   function bpw(key){ const p=D().precisions.find(p=>p.key===key); return p?p.bpw:2; }
   function precLabel(key){ const p=D().precisions.find(p=>p.key===key); return p?p.label:key; }
+  // KV cache precision — shared by Module 4 and the master calculator (one source of truth).
+  const KVP=()=>D().kvPrecisions;
+  const kvp=b=>KVP().find(p=>p.bytes===b)||KVP()[0];
+  // Build the KV-shape object CALC needs from a model preset. Single place that knows the
+  // field list, so adding an attention field can't silently get dropped by one caller.
+  // kvBytes overrides the preset's native dtype (the KV-precision control drives it).
+  function kvModelOf(m, kvBytes){
+    return {layers:m.layers, fullLayers:m.fullLayers, swaWindow:m.swaWindow,
+      kvHeads:m.kvHeads, headDim:m.headDim, swaKvHeads:m.swaKvHeads, swaHeadDim:m.swaHeadDim,
+      kvTensors:m.kvTensors, kvBytes:kvBytes!=null?kvBytes:m.kvBytes};
+  }
+  // "heads×dim", or both shapes when the sliding layers differ from the global ones
+  function kvGeom(m){
+    const g=`${m.kvHeads}×${m.headDim}`;
+    if(m.swaKvHeads==null&&m.swaHeadDim==null) return g;
+    return `${g} global / ${m.swaKvHeads||m.kvHeads}×${m.swaHeadDim||m.headDim} sliding`;
+  }
 
   // generic segmented control
   function seg(el,cb){
@@ -64,20 +81,23 @@
     const sel=$("kv-model"); if(!sel)return;
     sel.innerHTML=D().models.map(m=>`<option value="${m.id}">${m.name}</option>`).join("");
     const usr=$("kv-users"), ctx=$("kv-ctx");
-    const KVD={2:{label:"FP16",hint:"2 bytes per K/V value · reference, lossless"},1:{label:"FP8",hint:"1 byte per K/V value · near-lossless, ~½ the KV"},0.5:{label:"INT4",hint:"0.5 bytes per K/V value · aggressive, ~¼ the KV — may cost quality"}};
     let kvBytes=2;
     function baseModel(){ return D().models.find(m=>m.id===sel.value); }
     function syncSeg(){ const s=$("kv-dtype"); if(s)s.querySelectorAll("button").forEach(b=>b.classList.toggle("active",+b.dataset.kvb===kvBytes));
-      if($("kv-dtype-val"))$("kv-dtype-val").textContent=KVD[kvBytes].label; if($("kv-dtype-hint"))$("kv-dtype-hint").textContent=KVD[kvBytes].hint; }
+      const p=kvp(kvBytes);
+      if($("kv-dtype-val"))$("kv-dtype-val").textContent=p.label; if($("kv-dtype-hint"))$("kv-dtype-hint").textContent=p.hint; }
     function upd(){
       const m={...baseModel(), kvBytes}, users=+usr.value, c=+ctx.value;
-      const perTokMB=D().kvPerTokenMB(m);
+      // effective rate at THIS context — below the naive rate for hybrid-attention models
+      const perTokMB=D().kvPerTokenMB(m,c);
       const kvGB=C().kvGB(users,c,m);
       const w=C().weightsGB(m.paramsB,bpw(m.prec));
       const oh=C().overheadGB(w+kvGB);
       const vram=w+kvGB+oh;
       $("kv-model-val").textContent=m.name;
-      $("kv-arch").textContent=`${m.layers} layers · ${m.kvHeads} KV heads · dim ${m.headDim} · ${m.moe?"MoE":"GQA"} · ${precLabel(m.prec)} weights${m.kvNote?" · "+m.kvNote:""}`;
+      const sp=C().kvLayerSplit(m);
+      const attn=C().isHybridKV(m)?`${sp.full} global + ${sp.swa} sliding@${commas(sp.window)}`:`${m.layers} global`;
+      $("kv-arch").textContent=`${m.layers} KV layers (${attn}) · KV heads×dim ${kvGeom(m)} · ${m.kvTensors===1?"MLA latent":m.moe?"MoE":"GQA"} · ${precLabel(m.prec)} weights${m.kvNote?" · "+m.kvNote:""}`;
       $("kv-users-val").textContent=users;
       $("kv-ctx-val").textContent=commas(c);
       $("kv-pertok").innerHTML=`${perTokMB.toFixed(3)} <span class="u">MB</span>`;
@@ -239,13 +259,17 @@
     const dv=$("mc-device");
     dv.innerHTML=D().devices.map(d=>`<option value="${d.id}">${d.name} · ${d.memGB}GB</option>`).join("")+`<option value="__custom__">＋ Custom device…</option>`;
     ms.value="gemma26a4b"; dv.value="rtxpro6000";
-    const st={prec:"q4",users:16,ctx:8192,prompt:2000};
+    const st={prec:"q4",kvBytes:2,users:16,ctx:8192,prompt:2000};
     const num=(id,def)=>{ const el=$(id), v=el?parseFloat(el.value):NaN; return isFinite(v)&&v>0?v:def; };
+    // like num() but accepts 0 — "0 global layers" is a legitimate all-sliding stack
+    const num0=(id,def)=>{ const el=$(id), v=el?parseFloat(el.value):NaN; return isFinite(v)&&v>=0?v:def; };
     function customModel(){
       const tot=num("cm-total",0); if(!tot) return null; const act=num("cm-active",tot);
+      const L=num("cm-layers",48), fl=num0("cm-fulllayers",null), win=num("cm-swawin",null);
       return {id:"__custom__",name:"Custom model",paramsB:tot,activeB:Math.min(act,tot),
-        layers:num("cm-layers",48),kvHeads:num("cm-kvheads",8),headDim:num("cm-headdim",128),
-        kvBytes:num("cm-kvbytes",2),moe:act<tot,prec:st.prec};
+        layers:L,kvHeads:num("cm-kvheads",8),headDim:num("cm-headdim",128),
+        fullLayers:(fl!=null&&win!=null)?Math.min(fl,L):null, swaWindow:win,
+        kvBytes:st.kvBytes,moe:act<tot,prec:st.prec};
     }
     function customDevice(){
       const mem=num("cd-mem",0), bw=num("cd-bw",0), fp16=num("cd-fp16",0); if(!mem||!bw||!fp16) return null;
@@ -263,8 +287,10 @@
       if(!m || !dev){
         ["mc-vram","mc-ndev","mc-peruser","mc-agg","mc-bstar","mc-ttft-out","mc-disk"].forEach(id=>{const el=$(id);if(el)el.innerHTML="—";});
         $("mc-prec-val").textContent=precLabel(st.prec);
+        $("mc-kvprec-val").textContent=kvp(st.kvBytes).label;
+        $("mc-kv-note").style.display="none";
         $("mc-users-val").textContent=st.users; $("mc-ctx-val").textContent=commas(st.ctx); $("mc-prompt-val").textContent=commas(st.prompt);
-        $("mc-model-hint").textContent = m?`${m.paramsB}B${m.moe?` (MoE · ${m.activeB}B active)`:""} · ${m.layers}L / ${m.kvHeads} KV heads`:"↑ enter total params to define the model";
+        $("mc-model-hint").textContent = m?`${m.paramsB}B${m.moe?` (MoE · ${m.activeB}B active)`:""} · ${m.layers}L / KV ${kvGeom(m)}`:"↑ enter total params to define the model";
         $("mc-device-hint").textContent = dev?`${dev.memGB}GB · ${commas(dev.bwGBps)} GB/s · ${dev.eco}`:"↑ enter memory, bandwidth & FP16 TFLOPS";
         $("mc-moe-note").style.display="none"; $("mc-compute-note").innerHTML="";
         const vv=$("mc-verdict"); vv.className="verdict mt24 tight";
@@ -273,9 +299,11 @@
         $("mc-membar").innerHTML=""; $("mc-fit").innerHTML="";
         return;
       }
+      // KV precision is a user control, so it overrides the preset's native kvBytes.
+      // fullLayers/swaWindow carry the hybrid-attention shape into the engine.
+      const kvModel=kvModelOf(m,st.kvBytes);
       const s={paramsTotalB:m.paramsB,paramsActiveB:m.activeB,bytesPerWeight:bpw(st.prec),
-        model:{layers:m.layers,kvHeads:m.kvHeads,headDim:m.headDim,kvBytes:m.kvBytes},
-        users:st.users,ctxTokens:st.ctx,promptTokens:st.prompt};
+        model:kvModel,users:st.users,ctxTokens:st.ctx,promptTokens:st.prompt};
       const r=C().evaluate(s,dev);
       const _activeB=s.paramsActiveB||s.paramsTotalB, _awGB=C().weightsGB(_activeB,s.bytesPerWeight);
       // MoE: the *batched* compute ceiling behaves like ~3× active params (requests fan out across more
@@ -283,12 +311,23 @@
       // throughput curve. Dense: _capB === _activeB, so B* is unchanged. Keeps B* consistent with the curve.
       const _capB=(s.paramsTotalB>_activeB)?Math.min(s.paramsTotalB,_activeB*3):_activeB;
       const bstar=Math.round(C().decodeComputeCapTps(dev.fp16TF,_capB)/C().singleStreamTps(dev.bwGBps,_awGB));
-      $("mc-model-hint").textContent=`${m.paramsB}B${m.moe?` (MoE · ${m.activeB}B active)`:""} · ${m.layers}L / ${m.kvHeads} KV heads`;
+      $("mc-model-hint").textContent=`${m.paramsB}B${m.moe?` (MoE · ${m.activeB}B active)`:""} · ${m.layers}L / KV ${kvGeom(m)}`;
       $("mc-prec-val").textContent=precLabel(st.prec);
+      $("mc-kvprec-val").textContent=kvp(st.kvBytes).label;
       $("mc-device-hint").textContent=`${dev.memGB}GB · ${commas(dev.bwGBps)} GB/s · ${dev.eco}`;
       const moeNote=$("mc-moe-note");
       if(m.moe){ const _eff=+Math.min(m.paramsB,m.activeB*3).toFixed(1); moeNote.style.display="block"; moeNote.innerHTML=`⚠ <b>MoE</b> — memory sizes on <b>${m.paramsB}B total</b>; a single request uses only <b>${m.activeB}B active</b> (its top-k experts) → fast single-user speed &amp; TTFT. Batched requests fan out across far more experts and run less efficiently, so the throughput ceiling &amp; <b>Crossover B*</b> behave like a ≈<b>${_eff}B dense model</b> (≈3× active, capped at total). That's why per-user speed bends down at B* far sooner than the ${m.activeB}B active alone (Eqs 1–4) would imply.`; }
       else moeNote.style.display="none";
+      // Hybrid attention: explain why KV is far below layers × context × rate.
+      const kvNote=$("mc-kv-note"), split=C().kvLayerSplit(kvModel);
+      if(C().isHybridKV(kvModel)){
+        const naive=C().kvBytesPerToken(kvModel)*st.ctx*st.users/1e9;
+        const saved=naive>0?(naive/r.kvGB):1;
+        kvNote.style.display="block";
+        kvNote.innerHTML=`🪟 <b>Hybrid attention</b> — only <b>${split.full} of ${kvModel.layers}</b> KV layers attend globally; the other <b>${split.swa}</b> keep just a <b>${commas(split.window)}-token</b> sliding window, so their KV stops growing past that point. Real KV here is <b>${fmt(r.kvGB)} GB</b>, not the <b>${fmt(naive)} GB</b> a flat layers × context estimate gives — <b>${saved.toFixed(1)}× less</b>, and the gap widens as context grows.`;
+      } else kvNote.style.display="none";
+      const kvp0=kvp(st.kvBytes);
+      if($("mc-kvprec-hint")) $("mc-kvprec-hint").textContent=kvp0.hint;
       const cf=bestCompute(dev);
       $("mc-compute-note").innerHTML=`⚙ <b>${shortName(dev)}</b>'s fastest compute format is <b>${cf}</b>. Your <b>${precLabel(st.prec)}</b> sets the model's weight <i>storage</i> — the GPU does the math in its own format, independent of that choice.`;
       $("mc-users-val").textContent=st.users; $("mc-ctx-val").textContent=commas(st.ctx);
@@ -322,12 +361,13 @@
     }
     ms.addEventListener("change",upd); dv.addEventListener("change",upd);
     seg($("mc-prec"),d=>{st.prec=d.prec;upd();});
+    seg($("mc-kvprec"),d=>{st.kvBytes=+d.kvb;upd();});
     $("mc-users").addEventListener("input",e=>{st.users=+e.target.value;upd();});
     // Avg prompt can't exceed the context window — its slider range tracks Context/user.
     function syncPromptRange(){ const p=$("mc-prompt"); if(!p)return; p.max=st.ctx; if(st.prompt>st.ctx){ st.prompt=st.ctx; p.value=st.ctx; } }
     $("mc-ctx").addEventListener("input",e=>{ st.ctx=+e.target.value; syncPromptRange(); upd(); });
     $("mc-prompt").addEventListener("input",e=>{ st.prompt=+e.target.value; upd(); });
-    ["cm-total","cm-active","cm-layers","cm-kvheads","cm-headdim","cm-kvbytes","cd-mem","cd-bw","cd-fp16","cd-fp8"].forEach(id=>{const el=$(id);if(el)el.addEventListener("input",upd);});
+    ["cm-total","cm-active","cm-layers","cm-kvheads","cm-headdim","cm-fulllayers","cm-swawin","cd-mem","cd-bw","cd-fp16","cd-fp8"].forEach(id=>{const el=$(id);if(el)el.addEventListener("input",upd);});
     const ck=$("cd-kind"); if(ck)ck.addEventListener("change",upd);
     syncPromptRange(); upd();
   }
@@ -357,7 +397,7 @@
     root.innerHTML=D().examples.map((ex,i)=>{
       const m=D().models.find(x=>x.id===ex.modelId);
       const s={paramsTotalB:m.paramsB,paramsActiveB:m.activeB,bytesPerWeight:bpw(ex.prec),
-        model:{layers:m.layers,kvHeads:m.kvHeads,headDim:m.headDim,kvBytes:m.kvBytes},
+        model:kvModelOf(m),
         users:ex.users,ctxTokens:ex.ctx,promptTokens:ex.prompt,targetTps:ex.targetTps,targetTtft:ex.targetTtft};
       const wGB=C().weightsGB(m.paramsB,bpw(ex.prec)), kv=C().kvGB(ex.users,ex.ctx,s.model);
       const vram=C().requiredVRAM(wGB,kv), disk=C().diskGB(wGB);
@@ -389,7 +429,7 @@
             <div class="sp"><div class="k">Target tok/s</div><div class="v">${ex.targetTps}</div></div>
             <div class="sp"><div class="k">Target TTFT</div><div class="v">${ex.targetTtft}s</div></div></div></div></div>
           <div class="step done"><h4>Run the equations</h4><div class="body"><div class="eq">weights_GB = ${m.paramsB}B × ${bpw(ex.prec)} = <span class="res">${wGB.toFixed(1)} GB</span>
-KV_GB = ${ex.users} × ${commas(ex.ctx)} × ${D().kvPerTokenMB(s.model).toFixed(3)} MB = <span class="res">${kv.toFixed(1)} GB</span>
+KV_GB = ${ex.users} × ${commas(ex.ctx)} × ${D().kvPerTokenMB(s.model,ex.ctx).toFixed(3)} MB = <span class="res">${kv.toFixed(1)} GB</span>
 total VRAM ≈ <span class="res">${vram.toFixed(0)} GB</span>   ·   disk_GB ≈ ${disk.toFixed(0)} GB</div></div></div>
           <div class="step done"><h4>Compare devices &amp; budget</h4><div class="body">
             <div class="table-wrap"><table><thead><tr><th>Option</th><th>Units</th><th>Per-user</th><th>TTFT</th><th>Verdict</th><th>Buy cost</th><th>~$/1M tok</th></tr></thead><tbody>${rows||'<tr><td colspan="6">No single listed device fits — shard across more GPUs.</td></tr>'}</tbody></table></div>

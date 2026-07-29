@@ -264,6 +264,10 @@
           <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M4 12h16M4 19h10"/></svg>
           <div><h4>Why it explodes</h4><p>Weights are shared by everyone. KV cache is <strong>per user, per token</strong>. Double the users <em>or</em> double the context → double this cost.</p></div>
         </div>
+        <div class="callout mt16">
+          <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          <div><h4>The exception: sliding-window layers</h4><p>That formula assumes every layer remembers every token. <strong>Hybrid-attention</strong> models break the assumption on purpose: most layers only ever look back a fixed window, so their KV <em>stops growing</em> once the sequence passes it. Gemma 4 26B-A4B keeps just <strong>5 of its 30</strong> layers global; the other 25 hold a 1,024-token window — and the two classes even use different shapes (2 KV heads × 512 dim global, 8 × 256 sliding).<sup><a class="cite" href="https://huggingface.co/google/gemma-4-26B-A4B-it/blob/main/config.json" target="_blank" rel="noopener">cfg</a></sup> At 256K context that's <strong>~5.6 GB</strong> per sequence instead of the ~59 GB the flat formula predicts — <strong>10.6× less</strong>. The calculator models this split, so the KV curve <strong>bends</strong> for these models rather than running straight.</p></div>
+        </div>
       </div>
 
       <div class="reveal d1">
@@ -278,6 +282,10 @@
         <div class="callout warnc mt16">
           <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.4 3.9a2 2 0 00-3.4 0z"/></svg>
           <div><h4>So your 8B isn't 16 GB</h4><p>16 GB weights + 27 GB KV + overhead ≈ <strong>~45 GB</strong>. An 80 GB GPU fits it easily; a 24 GB card never could.</p></div>
+        </div>
+        <div class="callout key mt16">
+          <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.7l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.7l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+          <div><h4>KV precision is its own dial</h4><p>The cache is quantized <em>separately</em> from the weights — vLLM's <span class="mono">kv_cache_dtype</span>, llama.cpp's <span class="mono">--cache-type-k/v</span>. Dropping it to FP8 halves KV outright, and on Hopper/Blackwell the format is native so there's no unpacking penalty. The calculator gives you this as its own control. Two cautions: quantization hurts <strong>long-context retrieval</strong> before it dents short-task scores, so test on <em>your</em> context lengths; and it only buys concurrency while you're <strong>memory-bound</strong> — once the compute roof binds, freeing KV buys nothing and you're taking a quality risk for zero gain.</p></div>
         </div>
       </div>
     </div>
@@ -561,8 +569,11 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
       <div class="lab-title"><span class="dot"></span> Hardware sizing calculator</div>
       <div class="controls mt16" style="grid-template-columns:repeat(auto-fit,minmax(185px,1fr))">
         <div class="ctrl"><div class="row"><label>Model</label></div><select id="mc-model"></select><div class="hint" id="mc-model-hint"></div></div>
-        <div class="ctrl"><div class="row"><label>Precision</label><span class="val" id="mc-prec-val">Q4</span></div>
+        <div class="ctrl"><div class="row"><label>Weight precision</label><span class="val" id="mc-prec-val">Q4</span></div>
           <div class="seg" id="mc-prec"><button data-prec="fp16">FP16</button><button data-prec="fp8">FP8</button><button data-prec="q5">Q5</button><button data-prec="q4" class="active">Q4</button></div></div>
+        <div class="ctrl"><div class="row"><label>KV cache precision</label><span class="val" id="mc-kvprec-val">FP16</span></div>
+          <div class="seg" id="mc-kvprec"><button data-kvb="2" class="active">FP16</button><button data-kvb="1">FP8</button><button data-kvb="0.5">INT4</button></div>
+          <div class="hint" id="mc-kvprec-hint"></div></div>
         <div class="ctrl"><div class="row"><label>Device</label></div><select id="mc-device"></select><div class="hint" id="mc-device-hint"></div></div>
       </div>
 
@@ -571,10 +582,11 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px">
           <div class="field"><label>Total params (B)</label><input type="number" id="cm-total" placeholder="30" min="0.1" step="0.1"></div>
           <div class="field"><label>Active params (B)</label><input type="number" id="cm-active" placeholder="blank = dense" min="0.1" step="0.1"></div>
-          <div class="field"><label>Layers</label><input type="number" id="cm-layers" placeholder="48" min="1" step="1"></div>
+          <div class="field"><label>KV-bearing layers</label><input type="number" id="cm-layers" placeholder="48" min="1" step="1"></div>
           <div class="field"><label>KV heads</label><input type="number" id="cm-kvheads" placeholder="8" min="1" step="1"></div>
           <div class="field"><label>Head dim</label><input type="number" id="cm-headdim" placeholder="128" min="1" step="1"></div>
-          <div class="field"><label>KV bytes (2=FP16, 1=FP8)</label><input type="number" id="cm-kvbytes" placeholder="2" min="0.5" step="0.5"></div>
+          <div class="field"><label>Global-attn layers</label><input type="number" id="cm-fulllayers" placeholder="all of them" min="0" step="1"></div>
+          <div class="field"><label>Sliding window</label><input type="number" id="cm-swawin" placeholder="none" min="0" step="128"></div>
         </div>
       </div>
 
@@ -591,6 +603,7 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
 
       <div id="mc-notes" style="margin-top:12px;display:flex;flex-direction:column;gap:7px">
         <div class="src" id="mc-moe-note" style="display:none;color:var(--warn)"></div>
+        <div class="src" id="mc-kv-note" style="display:none"></div>
         <div class="src" id="mc-compute-note"></div>
       </div>
 
@@ -735,6 +748,10 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
         <div class="callout warnc">
           <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3z"/></svg>
           <div><h4>Where it drifts</h4><p>Big models lean on multi-GPU + TensorRT-LLM (e.g. 70B hitting 250–300 tok/s with TP + FP8),<sup><a class="cite" href="https://blog.silexdata.com/blog/evaluating-llama-33-70b-inference-h100-a100/" target="_blank" rel="noopener">bench</a></sup> and speculative decoding can beat these formulas. TTFT under load is often 2–5× the compute floor.</p></div>
+        </div>
+        <div class="callout warnc">
+          <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          <div><h4>Hybrid models assume your engine implements the window</h4><p>For sliding-window models the KV figures here assume the serving engine only allocates the window for those layers. vLLM and SGLang do; a naive implementation allocates full context for <em>every</em> layer and KV lands <strong>3–5× higher</strong>. If you're sizing one of these, confirm it before trusting the number. The same applies to <strong>MLA</strong> (DeepSeek-V3): the 576-dim latent is what production engines cache, but HuggingFace's reference path decompresses first and caches far more.</p></div>
         </div>
         <div class="callout key">
           <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z"/></svg>
