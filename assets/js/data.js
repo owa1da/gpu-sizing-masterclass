@@ -34,8 +34,8 @@ window.DATA = {
      KV memory, which is what sets concurrency once weights fit. */
   kvPrecisions:[
     {bytes:2,   label:"FP16", hint:"2 bytes per K/V value · reference, lossless", quality:"Reference", q:"ok"},
-    {bytes:1,   label:"FP8",  hint:"1 byte per K/V value · near-lossless, ½ the KV", quality:"Near-lossless", q:"ok"},
-    {bytes:0.5, label:"INT4", hint:"0.5 bytes per K/V value · aggressive, ¼ the KV", quality:"Measurable drop", q:"warn"}
+    {bytes:1,   label:"FP8",  hint:"1 byte per K/V value · ½ the KV · safe at any context length", quality:"Near-lossless", q:"ok"},
+    {bytes:0.5, label:"INT4", hint:"0.5 bytes per K/V value · ¼ the KV · fine short-context, test past ~4K", quality:"Context-dependent", q:"warn"}
   ],
   kvPrecDefault:2,
 
@@ -114,6 +114,8 @@ window.DATA = {
     llamacfg:{n:"Llama 3.1 8B config.json",u:"https://huggingface.co/meta-llama/Llama-3.1-8B/blob/main/config.json"},
     lostmiddle:{n:"Lost in the Middle (Liu et al.)",u:"https://arxiv.org/abs/2307.03172"},
     moe:{n:"Hugging Face — Mixture of Experts",u:"https://huggingface.co/blog/moe"},
+    kvquant:{n:"Qllm-Eval — KV quantization vs context length (ICML 2024)",u:"https://arxiv.org/abs/2402.18158"},
+    vllmkv:{n:"vLLM — kv_cache_dtype",u:"https://docs.vllm.ai/en/latest/configuration/optimization.html"},
     h100:{n:"NVIDIA H100",u:"https://www.nvidia.com/en-us/data-center/h100/"},
     h200:{n:"NVIDIA H200",u:"https://www.nvidia.com/en-us/data-center/h200/"}
   }
