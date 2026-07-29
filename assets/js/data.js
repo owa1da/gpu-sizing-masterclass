@@ -39,6 +39,7 @@ window.DATA = {
     {id:"llama70b", name:"Llama 3.1 70B",  paramsB:70.6, activeB:70.6, layers:80, kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
     {id:"qwen72b",  name:"Qwen2.5 72B",    paramsB:72.7, activeB:72.7, layers:80, kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
     {id:"llama405b",name:"Llama 3.1 405B", paramsB:405,  activeB:405,  layers:126,kvHeads:8, headDim:128, kvBytes:2, prec:"q4",   moe:false},
+    {id:"gemma26a4b",name:"Gemma 4 26B-A4B (MoE)", paramsB:25.2, activeB:3.8, layers:30, kvHeads:8, headDim:256, kvBytes:2, prec:"q4", moe:true, kvNote:"Hybrid attention — 25 of 30 layers use a 1024-token sliding window; only 5 are full-attention (every 6th, including the last). Real KV at 256K is ~11 GB per user, not the ~64 GB this all-layers figure shows. Treat it as a loose upper bound."},
     {id:"qwen36a3b",name:"Qwen3.6 35B-A3B (MoE)", paramsB:35,  activeB:3,    layers:10, kvHeads:2, headDim:256, kvBytes:2, prec:"q4",  moe:true, kvNote:"Hybrid linear-attention MoE — only 10 of 40 layers carry a KV cache (the rest are Gated DeltaNet); modeled with those 10 KV-bearing layers."},
     {id:"mixtral",  name:"Mixtral 8×7B (MoE)", paramsB:46.7, activeB:12.9, layers:32, kvHeads:8, headDim:128, kvBytes:2, prec:"q4", moe:true},
     {id:"gptoss120b",name:"GPT-OSS 120B (MoE)", paramsB:117,  activeB:5.1,  layers:36, kvHeads:8, headDim:64,  kvBytes:2, prec:"awq4", moe:true},

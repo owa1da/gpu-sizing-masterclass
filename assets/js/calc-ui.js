@@ -238,7 +238,7 @@
     ms.innerHTML=D().models.map(m=>`<option value="${m.id}">${m.name}</option>`).join("")+`<option value="__custom__">＋ Custom model…</option>`;
     const dv=$("mc-device");
     dv.innerHTML=D().devices.map(d=>`<option value="${d.id}">${d.name} · ${d.memGB}GB</option>`).join("")+`<option value="__custom__">＋ Custom device…</option>`;
-    ms.value="qwen32b"; dv.value="h100";
+    ms.value="gemma26a4b"; dv.value="rtxpro6000";
     const st={prec:"q4",users:16,ctx:8192,prompt:2000};
     const num=(id,def)=>{ const el=$(id), v=el?parseFloat(el.value):NaN; return isFinite(v)&&v>0?v:def; };
     function customModel(){
