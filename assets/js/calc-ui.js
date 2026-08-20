@@ -258,8 +258,8 @@
     ms.innerHTML=D().models.map(m=>`<option value="${m.id}">${m.name}</option>`).join("")+`<option value="__custom__">＋ Custom model…</option>`;
     const dv=$("mc-device");
     dv.innerHTML=D().devices.map(d=>`<option value="${d.id}">${d.name} · ${d.memGB}GB</option>`).join("")+`<option value="__custom__">＋ Custom device…</option>`;
-    ms.value="gemma26a4b"; dv.value="rtxpro6000";
-    const st={prec:"q4",kvBytes:2,users:16,ctx:8192,prompt:2000};
+    ms.value="qwen3827b"; dv.value="rtxpro6000";
+    const st={prec:"q4",kvBytes:2,users:16,ctx:262144,prompt:2000};
     const num=(id,def)=>{ const el=$(id), v=el?parseFloat(el.value):NaN; return isFinite(v)&&v>0?v:def; };
     // like num() but accepts 0 — "0 global layers" is a legitimate all-sliding stack
     const num0=(id,def)=>{ const el=$(id), v=el?parseFloat(el.value):NaN; return isFinite(v)&&v>=0?v:def; };
