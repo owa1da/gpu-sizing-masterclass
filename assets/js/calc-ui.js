@@ -200,7 +200,15 @@
   }
 
   /* ---------- shared helpers for devices + master calc ---------- */
-  function shortName(d){ return d.name.replace(" Blackwell","").replace(" SXM","").replace(" (Blackwell)",""); }
+  function shortName(d){ return d.name.replace(" Blackwell","").replace(" SXM","").replace(" (Blackwell)","").replace("Radeon ",""); }
+  // vendor presentation: tag class, vendor label, software stack, chart colour
+  const VENDOR={
+    apple:{cls:"apple", label:"Apple",  stack:"MLX / Metal", color:"#b06cff"},
+    amd:  {cls:"amd",   label:"AMD",    stack:"ROCm / HIP",  color:"#ff6b81"},
+    nvidia:{cls:"nv",   label:"NVIDIA", stack:"CUDA",        color:"#6d8bff"}
+  };
+  function vend(d){ return VENDOR[d&&d.kind] || VENDOR.nvidia; }
+  function vendorTag(d,text){ const v=vend(d); return `<span class="tag ${v.cls}">${text||v.label}</span>`; }
   function kfmt(n){ return n>=1000 ? "$"+(n/1000).toFixed(n>=10000?0:1)+"k" : "$"+n; }
   // rough $/1M tokens: cloud rate if rented, else 3-yr amortized buy + power @ $0.15/kWh
   function perMTok(d,r){ if(!r.aggregateTps||r.aggregateTps<=0)return null; const units=r.devicesNeeded;
@@ -216,7 +224,7 @@
     const cards=$("device-cards");
     if(cards){
       cards.innerHTML=D().devices.map(d=>{
-        const tag=d.kind==="apple"?'<span class="tag apple">Apple</span>':'<span class="tag nv">NVIDIA</span>';
+        const tag=vendorTag(d);
         const tbs=d.bwGBps>=1000?(d.bwGBps/1000).toFixed(2).replace(/0$/,'')+" TB/s":d.bwGBps+" GB/s";
         return `<div class="card hov reveal"><div class="flex between aic" style="margin-bottom:8px">${tag}<span class="price">${kfmt(d.priceUSD)}</span></div>
           <h3 style="margin-bottom:4px">${d.name}</h3>
@@ -234,11 +242,11 @@
     if(tb){
       tb.innerHTML=D().devices.map(d=>`<tr><td><b>${d.name}</b><span class="sub">${d.memCfg}</span></td>
         <td>${d.memGB} GB</td><td>${commas(d.bwGBps)} GB/s</td><td>${d.fp16TF}</td><td class="mono">${kfmt(d.priceUSD)}</td>
-        <td>${d.kind==="apple"?'<span class="tag apple">MLX / Metal</span>':'<span class="tag nv">CUDA</span>'}</td></tr>`).join("");
+        <td>${vendorTag(d,vend(d).stack)}</td></tr>`).join("");
     }
-    const ids=["macmini4","macmini4pro","mbpm5max","studioultra","rtx5090","rtxpro6000","h100","h200"];
+    const ids=["macmini4","macmini4pro","mbpm5max","studioultra","rx7900xtx","rtx5090","rtxpro6000","h100","h200"];
     const ds=ids.map(i=>D().devices.find(d=>d.id===i)).filter(Boolean);
-    const colf=d=>d.kind==="apple"?"#b06cff":"#6d8bff";
+    const colf=d=>vend(d).color;
     if($("dev-mem-chart"))CH().vbars("dev-mem-chart",{unit:"GB",data:ds.map(d=>({label:shortName(d),value:d.memGB,color:colf(d)}))});
     if($("dev-bw-chart"))CH().vbars("dev-bw-chart",{unit:"GB/s",data:ds.map(d=>({label:shortName(d),value:d.bwGBps,color:colf(d)}))});
     const pe=$("dev-price-chart");
@@ -276,7 +284,7 @@
       const fp8=num("cd-fp8",0), kind=($("cd-kind")&&$("cd-kind").value)||"nvidia";
       return {id:"__custom__",name:"Custom device",memGB:mem,memCfg:"custom specs",
         bwGBps:bw,fp16TF:fp16,fp8TF:fp8>0?fp8:undefined,
-        kind:kind,eco:kind==="apple"?"Metal / MLX":"Custom · CUDA",priceUSD:0,tdp:0};
+        kind:kind,eco:"Custom · "+VENDOR[kind].stack,priceUSD:0,tdp:0};
     }
     function curModel(){ return ms.value==="__custom__"?customModel():D().models.find(x=>x.id===ms.value); }
     function curDevice(){ return dv.value==="__custom__"?customDevice():D().devices.find(d=>d.id===dv.value); }

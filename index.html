@@ -599,7 +599,7 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
           <div class="field"><label>Bandwidth (GB/s)</label><input type="number" id="cd-bw" placeholder="1000" min="10" step="10"></div>
           <div class="field"><label>FP16 TFLOPS</label><input type="number" id="cd-fp16" placeholder="300" min="1" step="1"></div>
           <div class="field"><label>FP8 TFLOPS (0=none)</label><input type="number" id="cd-fp8" placeholder="0" min="0" step="1"></div>
-          <div class="field"><label>Type</label><select id="cd-kind"><option value="nvidia">NVIDIA (CUDA)</option><option value="apple">Apple (unified)</option></select></div>
+          <div class="field"><label>Type</label><select id="cd-kind"><option value="nvidia">NVIDIA (CUDA)</option><option value="amd">AMD (ROCm)</option><option value="apple">Apple (unified)</option></select></div>
         </div>
       </div>
 
@@ -639,11 +639,11 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
   <div class="wrap">
     <div class="section-head reveal">
       <span class="eyebrow">Module 09 · Hardware</span>
-      <h2>Choosing the box — <span class="grad-text">Apple vs NVIDIA</span></h2>
-      <p>Same equations, two very different philosophies. Here's the priced lineup and how to think about each.</p>
+      <h2>Choosing the box — <span class="grad-text">Apple vs AMD vs NVIDIA</span></h2>
+      <p>Same equations, three very different philosophies. Here's the priced lineup and how to think about each.</p>
     </div>
 
-    <div class="grid g2 mt8">
+    <div class="grid g3 mt8">
       <div class="callout analogy reveal">
         <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
         <div><h4>Apple = simple local capacity</h4><p>Unified memory still gives you <strong>one easy pool for local models</strong>, but 2026 memory cuts removed the biggest desktop configs. Lower bandwidth and a Metal/MLX stack mean Apple shines for <strong>1–few users, local/private</strong> jobs — not heavy multi-user serving.</p></div>
@@ -651,6 +651,10 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
       <div class="callout key reveal d1">
         <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>
         <div><h4>NVIDIA = bandwidth &amp; throughput</h4><p>Far higher bandwidth + the mature <strong>CUDA / vLLM / TensorRT-LLM</strong> stack make NVIDIA the choice for <strong>real multi-user serving</strong>, batching and multi-GPU scaling — at much higher cost and power.</p></div>
+      </div>
+      <div class="callout analogy reveal d2">
+        <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg>
+        <div><h4>AMD = VRAM per dollar</h4><p>The RX 7900 XTX buys <strong>24 GB for well under half a 5090</strong> at the same 960 GB/s as a 5080 — the value pick for one card serving <strong>8–14B at FP16 or ~27B at Q4</strong>. You pay for it in ecosystem: <strong>ROCm</strong> works with vLLM and llama.cpp on Linux, but it's a narrower, more fragile path than CUDA, and RDNA 3 has <strong>no FP8 matrix</strong>, so quantized weights buy you bandwidth savings but no faster math.</p></div>
       </div>
     </div>
 
