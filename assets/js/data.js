@@ -11,8 +11,10 @@ window.DATA = {
     mfuPrefill:0.40,   // Model FLOPs Utilization in prefill (realistic 0.3–0.5)
     overheadFrac:0.10, // activations/fragmentation as fraction of weights
     minOverheadGB:2,   // CUDA/runtime context floor
-    nvUtil:0.90,       // usable VRAM fraction (vLLM gpu_memory_utilization default)
+    discreteUtil:1.00, // physical VRAM is the fit ceiling; runtime/fragmentation is already in overheadGB
     appleUtil:0.75,    // usable unified memory (macOS reserves the rest)
+    tightHeadroomFrac:0.05, // flag a one-device fit when less than 5% remains after modeled overhead
+    tightHeadroomGB:1, // or less than 1 GB, whichever warning threshold is larger
     diskFactor:1.2     // download + scratch overhead
   },
 
@@ -59,7 +61,7 @@ window.DATA = {
   ],
 
   /* ---- Devices (verified specs, 2026) ----
-     kind:"nvidia"|"apple"; memGB = config used for serving; fp16TF = DENSE FP16/BF16 TFLOPS.
+     kind:"nvidia"|"amd"|"apple"; memGB = config used for serving; fp16TF = DENSE FP16/BF16 TFLOPS.
      Apple TFLOPS are approximate (framework-dependent); memory/bandwidth/price are verified. */
   devices:[
     {id:"macmini4",  name:"Mac Mini M4",            vendor:"Apple", kind:"apple", memGB:24,  memCfg:"16/24 GB", bwGBps:120,  fp16TF:7,   priceUSD:999,   tdp:65,  eco:"Metal / MLX", note:"Current buyable max is 24 GB after 2026 memory cuts; good for small local models.", src:"https://www.apple.com/mac-mini/specs/", priceSrc:"https://www.apple.com/shop/buy-mac/mac-mini"},
@@ -67,7 +69,7 @@ window.DATA = {
     {id:"mbpm5max",  name:"MacBook Pro M5 Max",      vendor:"Apple", kind:"apple", memGB:128, memCfg:"up to 128 GB",bwGBps:614,  fp16TF:50,  priceUSD:5399,  tdp:120, eco:"Metal / MLX", note:"Huge memory in a laptop — runs 70B Q4 locally.", src:"https://www.apple.com/newsroom/2026/03/apple-introduces-macbook-pro-with-all-new-m5-pro-and-m5-max/", priceSrc:"https://www.apple.com/shop/buy-mac/macbook-pro/16-inch"},
     {id:"studioultra",name:"Mac Studio M3 Ultra",   vendor:"Apple", kind:"apple", memGB:96,  memCfg:"96 GB",bwGBps:819, fp16TF:56,  priceUSD:5299,  tdp:270, eco:"Metal / MLX", note:"Current M3 Ultra Studio config after 2026 high-memory SKU cuts.", src:"https://www.apple.com/mac-studio/specs/", priceSrc:"https://www.apple.com/shop/buy-mac/mac-studio"},
     {id:"rtx5080",   name:"RTX 5080",               vendor:"NVIDIA",kind:"nvidia",memGB:16,  memCfg:"16 GB GDDR7", bwGBps:960,  fp16TF:225, fp8TF:450, priceUSD:1250,  tdp:360, eco:"CUDA", note:"Entry CUDA card; street prices sit above launch MSRP.", src:"https://www.techpowerup.com/gpu-specs/geforce-rtx-5080.c4217", priceSrc:"https://bestvaluegpu.com/history/new-and-used-rtx-5080-price-history-and-specs/"},
-    {id:"rx7900xtx", name:"Radeon RX 7900 XTX",     vendor:"AMD",   kind:"amd",   memGB:24,  memCfg:"24 GB GDDR6", bwGBps:960,  fp16TF:123, priceUSD:930,   tdp:355, eco:"ROCm / HIP", note:"24 GB for well under half a 5090 — the value pick for 8–14B at FP16 or ~27B at Q4. No FP8 matrix on RDNA 3, and ROCm is solid on Linux but thinner than CUDA.", src:"https://www.techpowerup.com/gpu-specs/radeon-rx-7900-xtx.c3941", priceSrc:"https://bestvaluegpu.com/history/new-and-used-rx-7900-xtx-price-history-and-specs/"},
+    {id:"rx7900xtx", name:"Radeon RX 7900 XTX",     vendor:"AMD",   kind:"amd",   memGB:24,  memCfg:"24 GB GDDR6", bwGBps:960,  fp16TF:123, priceUSD:930,   tdp:355, eco:"ROCm / HIP", note:"24 GB for well under half a 5090 — the value pick for 8–14B at FP16 or up to ~35B at Q4 with modest context and tight headroom. No FP8 matrix on RDNA 3, and ROCm is solid on Linux but thinner than CUDA.", src:"https://www.techpowerup.com/gpu-specs/radeon-rx-7900-xtx.c3941", priceSrc:"https://bestvaluegpu.com/history/new-and-used-rx-7900-xtx-price-history-and-specs/"},
     {id:"rtx5090",   name:"RTX 5090",               vendor:"NVIDIA",kind:"nvidia",memGB:32,  memCfg:"32 GB GDDR7", bwGBps:1792, fp16TF:419, fp8TF:838, priceUSD:4200,  tdp:575, eco:"CUDA", note:"Best consumer card; 32B Q4 comfortably, but 2026 street price is far above MSRP.", src:"https://www.techpowerup.com/gpu-specs/geforce-rtx-5090.c4216", priceSrc:"https://bestvaluegpu.com/history/new-and-used-rtx-5090-price-history-and-specs/"},
     {id:"rtxpro6000",name:"RTX PRO 6000 Blackwell", vendor:"NVIDIA",kind:"nvidia",memGB:96,  memCfg:"96 GB GDDR7", bwGBps:1792, fp16TF:503, fp8TF:1000, priceUSD:13250, tdp:600, eco:"CUDA", note:"96 GB workstation card — current NVIDIA list price jumped in 2026.", src:"https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000/", priceSrc:"https://www.tomshardware.com/pc-components/gpus/nvidia-raises-rtx-pro-6000-blackwell-gpu-pricing-to-usd13-250-55-percent-increase-over-msrp-in-a-years-time"},
     {id:"a100",      name:"A100 80GB",              vendor:"NVIDIA",kind:"nvidia",memGB:80,  memCfg:"80 GB HBM2e", bwGBps:2039, fp16TF:312, priceUSD:10000, tdp:400, eco:"CUDA", cloudHr:1.5, note:"Workhorse datacenter GPU; current used/refurb market is cheaper than H100.", src:"https://www.nvidia.com/en-us/data-center/a100/", priceSrc:"https://gpupoet.com/gpu/shop/nvidia-a100-pcie"},

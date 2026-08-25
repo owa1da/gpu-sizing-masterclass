@@ -17,8 +17,10 @@
     mfuPrefill:0.40,    // model FLOPs utilization during prefill
     overheadFrac:0.10,  // activation/fragmentation as fraction of weights
     minOverheadGB:2,    // CUDA/runtime context floor
-    nvUtil:0.90,        // usable VRAM fraction (NVIDIA, e.g. vLLM default)
+    discreteUtil:1.00,  // physical VRAM; runtime/fragmentation is already charged in overheadGB
     appleUtil:0.75,     // usable unified memory fraction (Apple, OS reserve)
+    tightHeadroomFrac:0.05, // warn when a one-device fit leaves less than 5%
+    tightHeadroomGB:1,   // or less than 1 GB, whichever threshold is larger
     diskFactor:1.2      // download + scratch overhead
   };
 
@@ -119,7 +121,14 @@
   function diskGB(totalWeightGB, copies){ return totalWeightGB*(copies||1)*K().diskFactor; }
 
   // ---- Device capacity ----
-  function usableMem(capacityGB, kind){ const k=K(); return capacityGB*(kind==="apple"?k.appleUtil:k.nvUtil); }
+  // Compare the fully-accounted requirement (weights + KV + runtime overhead) with
+  // physical VRAM on discrete GPUs. gpu_memory_utilization is an engine-specific,
+  // configurable allocator policy; applying it here as another reserve double-counts
+  // the runtime/fragmentation overhead above and can turn a real one-GPU fit into 2×.
+  function usableMem(capacityGB, kind){
+    const k=K(), util=kind==="apple"?k.appleUtil:(k.discreteUtil==null?1:k.discreteUtil);
+    return capacityGB*util;
+  }
   function devicesNeeded(reqVRAM, usablePerDevice){ return Math.max(1,Math.ceil(reqVRAM/usablePerDevice)); }
   // Largest weights+KV that still fits once overhead is charged ON TOP of it.
   // overhead = max(minOverheadGB, overheadFrac*(w+kv)), so solve whichever branch binds:
@@ -144,6 +153,8 @@
     const usable=usableMem(d.memGB,d.kind);
     const nDev=devicesNeeded(reqV,usable);
     const totalUsable=usable*nDev;
+    const headroomGB=totalUsable-reqV;
+    const tightHeadroom=nDev===1 && headroomGB<Math.max(K().tightHeadroomGB,usable*K().tightHeadroomFrac);
     // KV budget must charge overhead at the batch we're solving FOR, not at the current
     // user count — otherwise maxBatch reports a batch that wouldn't actually fit.
     const kvBudget=Math.max(0,payloadBudget(totalUsable)-wGB);
@@ -163,10 +174,10 @@
     const ttftOk=s.targetTtft? tt<=s.targetTtft : true;
     let verdict="fit";
     if(!memFit) verdict="nofit";
-    else if(!speedOk||!ttftOk||nDev>1) verdict="tight";
+    else if(!speedOk||!ttftOk||nDev>1||tightHeadroom) verdict="tight";
     return {
       weightsGB:wGB, activeWeightsGB:activeWGB, kvGB:kv, overheadGB:oh, requiredVRAM:reqV,
-      usablePerDevice:usable, devicesNeeded:nDev, totalUsable,
+      usablePerDevice:usable, devicesNeeded:nDev, totalUsable, headroomGB, tightHeadroom,
       singleStreamTps:agg.singleStreamTps, aggregateTps:agg.aggregateTps, perUserTps:agg.perUserTps,
       batch:agg.batch, maxBatch:agg.maxBatch, bound:agg.bound, kvLimited:agg.kvLimited,
       ttft:tt, diskGB:diskGB(wGB,1),
@@ -174,11 +185,32 @@
     };
   }
 
-  window.CALC={
+  const API={
     weightsGB,kvBytesPerToken,kvGBPerToken,kvBytesPerTokenPerLayer,
     kvLayerSplit,kvBytesPerSeq,kvGBPerSeq,kvBytesPerTokenEff,isHybridKV,
     kvGB,overheadGB,requiredVRAM,
     singleStreamTps,decodeComputeCapTps,kvMaxBatch,aggregateDecode,
     prefillTps,ttft,diskGB,usableMem,devicesNeeded,payloadBudget,evaluate,FALLBACK
   };
+  window.CALC=API;
+
+  // Guarded regression anchors: warn about numeric drift without breaking the lesson.
+  const selfChecks=[];
+  function check(name,actual,expected,tolerance){
+    const pass=typeof actual==="number" && isFinite(actual) && Math.abs(actual-expected)<=tolerance;
+    selfChecks.push({name,pass,actual,expected,tolerance});
+  }
+  check("24 GB discrete GPU exposes 24 GB to the accounted fit model",usableMem(24,"amd"),24,1e-12);
+  const qwen35Rx7900=evaluate({
+    paramsTotalB:35,paramsActiveB:3,bytesPerWeight:0.60,
+    users:1,ctxTokens:1024,promptTokens:1024,
+    model:{layers:10,kvHeads:2,headDim:256,kvBytes:0.5}
+  },{memGB:24,bwGBps:960,fp16TF:123,kind:"amd"});
+  check("Qwen 35B Q4 + INT4 KV requires 23.105767168 GB",qwen35Rx7900.requiredVRAM,23.105767168,1e-9);
+  check("Qwen 35B Q4 is a one-GPU RX 7900 XTX fit",qwen35Rx7900.devicesNeeded,1,0);
+  API.selfChecks=selfChecks;
+  const failed=selfChecks.filter(x=>!x.pass);
+  if(failed.length && typeof console!=="undefined" && console.warn){
+    console.warn("CALC self-check failures",failed);
+  }
 })();

@@ -348,10 +348,12 @@
       $("mc-ttft-out").innerHTML= r.ttft<1?`${(r.ttft*1000).toFixed(0)} <span class="u">ms</span>`:`${r.ttft.toFixed(2)} <span class="u">s</span>`;
       $("mc-disk").innerHTML=`${fmt(r.diskGB)} <span class="u">GB</span>`;
       const v=$("mc-verdict");
-      v.className="verdict mt24 "+(r.verdict==="fit"?"fit":r.verdict==="tight"?"tight":"nofit");
+      v.className="verdict mt24 "+(r.verdict==="fit"&&!r.tightHeadroom?"fit":r.verdict==="nofit"?"nofit":"tight");
       let icon,vt,vs;
       if(r.verdict==="nofit"){icon="✕";vt="Doesn't fit on this device";vs=`Needs ${fmt(r.requiredVRAM)} GB but one ${shortName(dev)} offers only ${fmt(r.usablePerDevice)} GB usable. Quantize harder, choose more memory, or shard across ${r.devicesNeeded} units.`;}
-      else if(r.verdict==="tight"){icon="!";vt="Workable — multi-GPU";vs=`Fits, but needs ${r.devicesNeeded}× ${shortName(dev)} (tensor-parallel). Simpler if it fit on one unit — more memory or harder quantization gets you there.`;}
+      else if(r.devicesNeeded>1){icon="!";vt="Workable — multi-GPU";vs=`Fits, but needs ${r.devicesNeeded}× ${shortName(dev)} (tensor-parallel). Simpler if it fit on one unit — more memory or harder quantization gets you there.`;}
+      else if(r.tightHeadroom){icon="!";vt="Fits — tight single-GPU";vs=`Runs on one ${shortName(dev)}, using ${fmt(r.requiredVRAM)} of ${fmt(r.usablePerDevice)} GB after modeled overhead. Keep other GPU workloads closed; exact runtime buffers can move this narrow margin.`;}
+      else if(r.verdict==="tight"){icon="!";vt="Workable — target-limited";vs=`It fits on one ${shortName(dev)}, but misses a speed or first-token target. Choose a faster device or relax the target.`;}
       else {icon="✓";vt="Great fit";vs=`Fits on a single ${shortName(dev)} with headroom (${fmt(r.requiredVRAM)} of ${fmt(r.usablePerDevice)} GB usable).`;}
       v.querySelector(".vic").textContent=icon; v.querySelector(".vt").textContent=vt; v.querySelector(".vs").textContent=vs;
       CH().hstack("mc-membar",{unit:"GB",capacity:+r.totalUsable.toFixed(0),capLabel:`usable (${r.devicesNeeded}× ${shortName(dev)})`,segments:[

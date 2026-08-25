@@ -654,7 +654,7 @@ actual_KV     = users × <span class="hl">avg_used_context</span>
       </div>
       <div class="callout analogy reveal d2">
         <svg class="cic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/></svg>
-        <div><h4>AMD = VRAM per dollar</h4><p>The RX 7900 XTX buys <strong>24 GB for well under half a 5090</strong> at the same 960 GB/s as a 5080 — the value pick for one card serving <strong>8–14B at FP16 or ~27B at Q4</strong>. You pay for it in ecosystem: <strong>ROCm</strong> works with vLLM and llama.cpp on Linux, but it's a narrower, more fragile path than CUDA, and RDNA 3 has <strong>no FP8 matrix</strong>, so quantized weights buy you bandwidth savings but no faster math.</p></div>
+        <div><h4>AMD = VRAM per dollar</h4><p>The RX 7900 XTX buys <strong>24 GB for well under half a 5090</strong> at the same 960 GB/s as a 5080 — the value pick for one card serving <strong>8–14B at FP16 or up to ~35B at Q4</strong> when context is modest and headroom is tight. You pay for it in ecosystem: <strong>ROCm</strong> works with vLLM and llama.cpp on Linux, but it's a narrower, more fragile path than CUDA, and RDNA 3 has <strong>no FP8 matrix</strong>, so quantized weights buy you bandwidth savings but no faster math.</p></div>
       </div>
     </div>
 
